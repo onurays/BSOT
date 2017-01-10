@@ -10,13 +10,18 @@
 
 import cv2
 from geometry import *
+from tracker import Tracker
 
 class Bsot:
+
+    is_first_frame = False
+    tracks = []
 
     def __init__(self, video_url):
         self.capture = cv2.VideoCapture(video_url)
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
         self.fgbg = cv2.createBackgroundSubtractorMOG2()
+        self.tracker = Tracker()
 
     def has_new_frame(self):
         return self.capture.grab()
@@ -29,7 +34,14 @@ class Bsot:
         imC, self.contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         self.contours = [contour for contour in self.contours if cv2.contourArea(contour) > 50]
 
-        self.bounding_boxes = self.cluster_bounding_boxes(self.contours)
+        bounding_boxes = self.cluster_bounding_boxes(self.contours)
+
+        # Skip the first frame for a bug that founds a full size contour
+        if not self.is_first_frame:
+            self.is_first_frame = True
+            return
+
+        self.tracks = self.tracker.track(bounding_boxes)
 
     def cluster_bounding_boxes(self, contours):
         bounding_boxes = []
@@ -79,8 +91,12 @@ class Bsot:
 
     def get_bounding_boxes_image(self):
         bounding_box_image = self.frame.copy()
-        for bounding_box in self.bounding_boxes:
-            cv2.rectangle(bounding_box_image, (bounding_box.x, bounding_box.y), (bounding_box.x+bounding_box.w, bounding_box.y+bounding_box.h), bounding_box.color, 2)
+        if self.tracks is not None:
+            for track in self.tracks:
+                if track.age < 2:
+                    bounding_box = track.bounding_box
+                    cv2.rectangle(bounding_box_image, (bounding_box.x, bounding_box.y), (bounding_box.x+bounding_box.w, bounding_box.y+bounding_box.h), track.color, 2)
+                    cv2.putText(bounding_box_image, "id=" + str(track.id), (bounding_box.rect.r_top.x, bounding_box.rect.r_top.y) ,cv2.FONT_HERSHEY_SIMPLEX, 1, track.color, 2, cv2.LINE_AA)
         return bounding_box_image
 
     def destroy(self):
@@ -94,8 +110,6 @@ class Bsot:
             self.y = rect.l_top.y
             self.w = rect.width
             self.h = rect.height
-            self.color = None
-            self.tracker_id = 0
 
         def __init__(self, rect):
             self.update_rect(rect)
